@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-async-std = "1.10.0"
+dotenv = "0.15"
 anyhow = "1.0"
 futures = "0.3"
-sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls"] }
 structopt = "0.3"
+async-trait = "0.1.81"
 tokio = { version = "1.20.0", features = ["rt", "macros"]}
- 
+sqlx = { version = "0.7", features = ["sqlite", "postgres", "runtime-tokio-native-tls"] }
