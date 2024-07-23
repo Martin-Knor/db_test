@@ -1,7 +1,7 @@
-use sqlx::{postgres::PgPool, sqlite::SqlitePool, Row, Executor};
+use async_trait::async_trait;
+use sqlx::{postgres::PgPool, sqlite::SqlitePool, Executor, Row};
 use std::sync::Arc;
 use structopt::StructOpt;
-use async_trait::async_trait;
 
 const DATABASE_URL_SQL: &str = "sqlite:todos.db";
 const DATABASE_URL_POSTGRES: &str = "postgres://postgres:password@localhost/todos";
@@ -25,34 +25,31 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::from_args_safe()?;
 
     if DATABASE_URL_SQL.starts_with("sqlite:") {
+        println!("\n/*-----------------------------------*/\n/*              sqlite               */\n/*-----------------------------------*/");
         let pool = SqlitePool::connect(DATABASE_URL_SQL).await?;
         let sqlite_db = SqliteDBTraits::new(pool);
-
-        // Run the CREATE TABLE query
-        sqlite_db.create_table().await?;
 
         handle_command(&args, &sqlite_db).await.expect("panic");
     }
     if DATABASE_URL_POSTGRES.starts_with("postgres:") {
+        println!("\n/*-----------------------------------*/\n/*              postgres             */\n/*-----------------------------------*/");
         let pool = PgPool::connect(DATABASE_URL_POSTGRES).await?;
         let postgres_db = PostgresDBTraits::new(pool);
 
-        // Run the CREATE TABLE query
-        postgres_db.create_table().await?;
-
         handle_command(&args, &postgres_db).await.expect("panic");
     }
-    if !(DATABASE_URL_SQL.starts_with("sqlite:") || DATABASE_URL_POSTGRES.starts_with("postgres:")) {
+    if !(DATABASE_URL_SQL.starts_with("sqlite:") || DATABASE_URL_POSTGRES.starts_with("postgres:"))
+    {
         return Err(anyhow::anyhow!("Unsupported database type"));
     }
 
     Ok(())
 }
 
-async fn handle_command(
-    args: &Args,
-    database: &impl DBTraits,
-) -> anyhow::Result<()> {
+async fn handle_command(args: &Args, database: &impl DBTraits) -> anyhow::Result<()> {
+    // Run the CREATE TABLE query
+    database.create_table().await?;
+
     match &args.cmd {
         Some(Command::Add { description }) => {
             println!("Adding new todo with description '{}'", &description);
@@ -63,7 +60,8 @@ async fn handle_command(
             println!("Marking todo {id} as done");
             if database.complete_todo(*id).await? {
                 println!("Todo {id} is marked as done");
-            } else {
+            } 
+            else {
                 println!("Invalid id {id}");
             }
         }
@@ -84,9 +82,9 @@ async fn handle_command(
 // database interface
 #[async_trait]
 pub trait DBTraits {
-    async fn create_table(&self) -> anyhow::Result<()>;
     async fn add_todo(&self, description: String) -> anyhow::Result<i64>;
     async fn complete_todo(&self, id: i64) -> anyhow::Result<bool>;
+    async fn create_table(&self) -> anyhow::Result<()>;
     async fn clear_todos(&self) -> anyhow::Result<()>;
     async fn list_todos(&self) -> anyhow::Result<()>;
 }
@@ -115,23 +113,23 @@ impl PostgresDBTraits {
     }
 }
 
-
 /*-----------------------------------*/
 /*           sqlite methods          */
 /*-----------------------------------*/
 #[async_trait]
 impl DBTraits for SqliteDBTraits {
     async fn create_table(&self) -> anyhow::Result<()> {
-        self.sqlite_pool.execute(
-            r#"
-            CREATE TABLE IF NOT EXISTS todos (
+        self.sqlite_pool
+            .execute(
+                r#"
+                CREATE TABLE IF NOT EXISTS todos (
                 id INTEGER PRIMARY KEY NOT NULL,
                 description TEXT NOT NULL,
                 done BOOLEAN NOT NULL DEFAULT 0
+                )
+                "#,
             )
-            "#,
-        )
-        .await?;
+            .await?;
         Ok(())
     }
 
@@ -139,9 +137,9 @@ impl DBTraits for SqliteDBTraits {
         // Insert the task, then obtain the ID of this row
         let id = sqlx::query(
             r#"
-    INSERT INTO todos (description)
-    VALUES (?1)
-            "#
+            INSERT INTO todos (description)
+            VALUES (?1)
+            "#,
         )
         .bind(description)
         .execute(&*self.sqlite_pool)
@@ -154,10 +152,10 @@ impl DBTraits for SqliteDBTraits {
     async fn complete_todo(&self, id: i64) -> anyhow::Result<bool> {
         let rows_affected = sqlx::query(
             r#"
-UPDATE todos
-SET done = TRUE
-WHERE id = $1
-            "#
+            UPDATE todos
+            SET done = TRUE
+            WHERE id = $1
+            "#,
         )
         .bind(id)
         .execute(&*self.sqlite_pool)
@@ -170,7 +168,7 @@ WHERE id = $1
     async fn clear_todos(&self) -> anyhow::Result<()> {
         sqlx::query(
             r#"
-    DELETE FROM todos
+            DELETE FROM todos
             "#,
         )
         .fetch_all(&*self.sqlite_pool)
@@ -182,10 +180,10 @@ WHERE id = $1
     async fn list_todos(&self) -> anyhow::Result<()> {
         let recs = sqlx::query(
             r#"
-SELECT id, description, done
-FROM todos
-ORDER BY id
-            "#
+            SELECT id, description, done
+            FROM todos
+            ORDER BY id
+            "#,
         )
         .fetch_all(&*self.sqlite_pool)
         .await?;
@@ -207,25 +205,23 @@ ORDER BY id
     }
 }
 
-
-
 /*-----------------------------------*/
 /*         postgres methods          */
 /*-----------------------------------*/
-
 #[async_trait]
 impl DBTraits for PostgresDBTraits {
     async fn create_table(&self) -> anyhow::Result<()> {
-        self.pg_pool.execute(
+        self.pg_pool
+            .execute(
             r#"
             CREATE TABLE IF NOT EXISTS todos (
-                id SERIAL PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 description TEXT NOT NULL,
                 done BOOLEAN NOT NULL DEFAULT FALSE
             )
             "#,
-        )
-        .await?;
+            )
+            .await?;
         Ok(())
     }
 
@@ -233,10 +229,10 @@ impl DBTraits for PostgresDBTraits {
         // Insert and return the newly inserted row's ID
         let rec = sqlx::query(
             r#"
-INSERT INTO todos (description)
-VALUES ($1)
-RETURNING id
-            "#
+            INSERT INTO todos (description)
+            VALUES ($1)
+            RETURNING id
+            "#,
         )
         .bind(description)
         .fetch_one(&*self.pg_pool)
@@ -249,10 +245,10 @@ RETURNING id
     async fn complete_todo(&self, id: i64) -> anyhow::Result<bool> {
         let rows_affected = sqlx::query(
             r#"
-UPDATE todos
-SET done = TRUE
-WHERE id = $1
-            "#
+            UPDATE todos
+            SET done = TRUE
+            WHERE id = $1
+            "#,
         )
         .bind(id)
         .execute(&*self.pg_pool)
@@ -265,7 +261,7 @@ WHERE id = $1
     async fn clear_todos(&self) -> anyhow::Result<()> {
         sqlx::query(
             r#"
-    DELETE FROM todos
+            DELETE FROM todos
             "#,
         )
         .fetch_all(&*self.pg_pool)
@@ -277,10 +273,10 @@ WHERE id = $1
     async fn list_todos(&self) -> anyhow::Result<()> {
         let recs = sqlx::query(
             r#"
-SELECT id, description, done
-FROM todos
-ORDER BY id
-            "#
+            SELECT id, description, done
+            FROM todos
+            ORDER BY id
+            "#,
         )
         .fetch_all(&*self.pg_pool)
         .await?;
