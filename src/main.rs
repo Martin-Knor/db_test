@@ -19,34 +19,45 @@ enum Command {
     Clear,
 }
 
+// database interface
+#[mockall::automock]
+#[async_trait]
+pub trait DBTrait {
+    async fn add_todo(&self, description: String) -> anyhow::Result<i64>;
+    async fn complete_todo(&self, id: i64) -> anyhow::Result<bool>;
+    async fn create_table(&self) -> anyhow::Result<()>;
+    async fn clear_todos(&self) -> anyhow::Result<()>;
+    async fn list_todos(&self) -> anyhow::Result<()>;
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     // Parse command line arguments
     let args = Args::from_args_safe()?;
-
+    
     if DATABASE_URL_SQL.starts_with("sqlite:") {
         println!("\n/*-----------------------------------*/\n/*              sqlite               */\n/*-----------------------------------*/");
         let pool = SqlitePool::connect(DATABASE_URL_SQL).await?;
-        let sqlite_db = SqliteDBTraits::new(pool);
-
+        let sqlite_db = SqliteDBStruct::new(pool);
+        
         handle_command(&args, &sqlite_db).await.expect("panic");
     }
     if DATABASE_URL_POSTGRES.starts_with("postgres:") {
         println!("\n/*-----------------------------------*/\n/*              postgres             */\n/*-----------------------------------*/");
         let pool = PgPool::connect(DATABASE_URL_POSTGRES).await?;
-        let postgres_db = PostgresDBTraits::new(pool);
+        let postgres_db = PostgresDBStruct::new(pool);
 
         handle_command(&args, &postgres_db).await.expect("panic");
     }
     if !(DATABASE_URL_SQL.starts_with("sqlite:") || DATABASE_URL_POSTGRES.starts_with("postgres:"))
     {
-        return Err(anyhow::anyhow!("Unsupported database type"));
+        return Err(anyhow::anyhow!("Unsupported Database Management System"));
     }
 
     Ok(())
 }
 
-async fn handle_command(args: &Args, database: &impl DBTraits) -> anyhow::Result<()> {
+async fn handle_command(args: &Args, database: &impl DBTrait) -> anyhow::Result<()> {
     // Run the CREATE TABLE query
     database.create_table().await?;
 
@@ -79,21 +90,11 @@ async fn handle_command(args: &Args, database: &impl DBTraits) -> anyhow::Result
     Ok(())
 }
 
-// database interface
-#[async_trait]
-pub trait DBTraits {
-    async fn add_todo(&self, description: String) -> anyhow::Result<i64>;
-    async fn complete_todo(&self, id: i64) -> anyhow::Result<bool>;
-    async fn create_table(&self) -> anyhow::Result<()>;
-    async fn clear_todos(&self) -> anyhow::Result<()>;
-    async fn list_todos(&self) -> anyhow::Result<()>;
-}
-
-struct SqliteDBTraits {
+struct SqliteDBStruct {
     sqlite_pool: Arc<SqlitePool>,
 }
 
-impl SqliteDBTraits {
+impl SqliteDBStruct {
     fn new(sqlite_pool: SqlitePool) -> Self {
         Self {
             sqlite_pool: Arc::new(sqlite_pool),
@@ -101,23 +102,11 @@ impl SqliteDBTraits {
     }
 }
 
-struct PostgresDBTraits {
-    pg_pool: Arc<PgPool>,
-}
-
-impl PostgresDBTraits {
-    fn new(pg_pool: PgPool) -> Self {
-        Self {
-            pg_pool: Arc::new(pg_pool),
-        }
-    }
-}
-
 /*-----------------------------------*/
-/*           sqlite methods          */
+/*          sqlite  methods          */
 /*-----------------------------------*/
 #[async_trait]
-impl DBTraits for SqliteDBTraits {
+impl DBTrait for SqliteDBStruct {
     async fn create_table(&self) -> anyhow::Result<()> {
         self.sqlite_pool
             .execute(
@@ -205,11 +194,23 @@ impl DBTraits for SqliteDBTraits {
     }
 }
 
+struct PostgresDBStruct {
+    pg_pool: Arc<PgPool>,
+}
+
+impl PostgresDBStruct {
+    fn new(pg_pool: PgPool) -> Self {
+        Self {
+            pg_pool: Arc::new(pg_pool),
+        }
+    }
+}
+
 /*-----------------------------------*/
-/*         postgres methods          */
+/*         postgres  methods         */
 /*-----------------------------------*/
 #[async_trait]
-impl DBTraits for PostgresDBTraits {
+impl DBTrait for PostgresDBStruct {
     async fn create_table(&self) -> anyhow::Result<()> {
         self.pg_pool
             .execute(
@@ -295,5 +296,41 @@ impl DBTraits for PostgresDBTraits {
         }
 
         Ok(())
+    }
+}
+
+
+/*-----------------------------------*/
+/*               tests               */
+/*-----------------------------------*/
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::result::Result::Ok;
+    use mockall::predicate::*;
+
+    // completely useless test ¯\_(ツ)_/¯
+    // just a template as to how to use the mockall crate
+    #[tokio::test]
+    async fn test_mocked_add() {
+        let description = String::from("My todo");
+        let args = Args {
+            cmd: Some(Command::Add {
+                description: description.clone(),
+            }),
+        };
+
+        let mut mock = MockDBTrait::new();
+        mock
+            .expect_create_table()
+            .times(1)
+            .returning(|| Ok(()));
+        mock
+            .expect_add_todo()
+            .times(1)
+            .with(eq(description))
+            .returning(|_| Ok(1));
+
+        assert!(matches!(handle_command(&args, &mock).await, Ok(())));
     }
 }
