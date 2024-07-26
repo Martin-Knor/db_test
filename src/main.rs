@@ -329,6 +329,10 @@ mod tests {
 
     // completely useless test ¯\_(ツ)_/¯
     // just a template as to how to use the mockall crate
+    // mock all can "fake" a DB connection
+    // while executing handle_command fn. create_table and add_todo are called and 
+    // mockall just returns predefined values so the handle_command can be tested
+    // independently without the need for DB connection
     #[tokio::test]
     async fn test_mocked_add() {
         let description = String::from("My todo");
