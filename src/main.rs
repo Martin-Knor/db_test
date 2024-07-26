@@ -3,20 +3,39 @@ use sqlx::{postgres::PgPool, sqlite::SqlitePool, Executor, Row};
 use std::sync::Arc;
 use structopt::StructOpt;
 
+/*
+DB URLS to connect to:
+DBs have to be created first
+uncomment the empty strings if you want the program to ignore that database
+*/
+
+// const DATABASE_URL_SQL: &str = "";
 const DATABASE_URL_SQL: &str = "sqlite:todos.db";
+// const DATABASE_URL_POSTGRES: &str = "";
 const DATABASE_URL_POSTGRES: &str = "postgres://postgres:password@localhost/todos";
 
+// Command line argument options
+#[derive(StructOpt)]
+enum Command {
+    Add { description: String },
+    Done { id: i64 },
+    Clear,
+}
+
+// structure to store command line arguments
 #[derive(StructOpt)]
 struct Args {
     #[structopt(subcommand)]
     cmd: Option<Command>,
 }
 
-#[derive(StructOpt)]
-enum Command {
-    Add { description: String },
-    Done { id: i64 },
-    Clear,
+// Database structures
+struct SqliteDBStruct {
+    sqlite_pool: Arc<SqlitePool>,
+}
+
+struct PostgresDBStruct {
+    pg_pool: Arc<PgPool>,
 }
 
 // database interface
@@ -35,16 +54,21 @@ async fn main() -> anyhow::Result<()> {
     // Parse command line arguments
     let args = Args::from_args_safe()?;
     
+    // execute action on sqlite database if the URL is defined
     if DATABASE_URL_SQL.starts_with("sqlite:") {
         println!("\n/*-----------------------------------*/\n/*              sqlite               */\n/*-----------------------------------*/");
+        // connect to the database and create a DB connection pool
         let pool = SqlitePool::connect(DATABASE_URL_SQL).await?;
+        // create sqliteDB object and initialize its pool field
         let sqlite_db = SqliteDBStruct::new(pool);
         
         handle_command(&args, &sqlite_db).await.expect("panic");
     }
     if DATABASE_URL_POSTGRES.starts_with("postgres:") {
         println!("\n/*-----------------------------------*/\n/*              postgres             */\n/*-----------------------------------*/");
+        // connect to the database and create a DB connection pool
         let pool = PgPool::connect(DATABASE_URL_POSTGRES).await?;
+        // create sqliteDB object and initialize its pool field
         let postgres_db = PostgresDBStruct::new(pool);
 
         handle_command(&args, &postgres_db).await.expect("panic");
@@ -57,6 +81,8 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+
+/// execute action on passed DB, that implements DBtrait, based on given command line argument
 async fn handle_command(args: &Args, database: &impl DBTrait) -> anyhow::Result<()> {
     // Run the CREATE TABLE query
     database.create_table().await?;
@@ -90,10 +116,9 @@ async fn handle_command(args: &Args, database: &impl DBTrait) -> anyhow::Result<
     Ok(())
 }
 
-struct SqliteDBStruct {
-    sqlite_pool: Arc<SqlitePool>,
-}
-
+/*-----------------------------------*/
+/*          sqlite  methods          */
+/*-----------------------------------*/
 impl SqliteDBStruct {
     fn new(sqlite_pool: SqlitePool) -> Self {
         Self {
@@ -102,9 +127,6 @@ impl SqliteDBStruct {
     }
 }
 
-/*-----------------------------------*/
-/*          sqlite  methods          */
-/*-----------------------------------*/
 #[async_trait]
 impl DBTrait for SqliteDBStruct {
     async fn create_table(&self) -> anyhow::Result<()> {
@@ -194,10 +216,9 @@ impl DBTrait for SqliteDBStruct {
     }
 }
 
-struct PostgresDBStruct {
-    pg_pool: Arc<PgPool>,
-}
-
+/*-----------------------------------*/
+/*         postgres  methods         */
+/*-----------------------------------*/
 impl PostgresDBStruct {
     fn new(pg_pool: PgPool) -> Self {
         Self {
@@ -206,9 +227,6 @@ impl PostgresDBStruct {
     }
 }
 
-/*-----------------------------------*/
-/*         postgres  methods         */
-/*-----------------------------------*/
 #[async_trait]
 impl DBTrait for PostgresDBStruct {
     async fn create_table(&self) -> anyhow::Result<()> {
